@@ -113,7 +113,7 @@ comparison = pd.DataFrame({
 
 st.dataframe(
     comparison,
-    use_container_width=True
+    width="stretch"
 )
 
 st.caption(
