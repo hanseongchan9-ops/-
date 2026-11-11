@@ -121,7 +121,7 @@ st.divider()
 if st.button(
     "10분 후 에너지 소비량 예측",
     type="primary",
-    use_container_width=True
+    width="stretch"
 ):
 
     input_data = make_input(
