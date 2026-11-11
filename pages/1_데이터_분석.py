@@ -44,7 +44,7 @@ st.header("데이터 미리보기")
 
 st.dataframe(
     raw_df.head(10),
-    use_container_width=True
+    width="stretch"
 )
 
 # -----------------------------
@@ -73,7 +73,7 @@ info_df["설명"] = info_df.index.map(variable_info)
 
 st.dataframe(
     info_df,
-    use_container_width=True
+    width="stretch"
 )
 
 # -----------------------------
@@ -86,7 +86,7 @@ missing = raw_df.isnull().sum()
 
 st.dataframe(
     missing.rename("결측치 개수"),
-    use_container_width=True
+    width="stretch"
 )
 
 # -----------------------------
