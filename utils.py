@@ -4,18 +4,13 @@ import pandas as pd
 import numpy as np
 
 from pathlib import Path
-from sklearn.linear_model import LinearRegression, DummyRegressor
-from sklearn.metrics import (
-    mean_absolute_error,
-    mean_squared_error,
-    r2_score
-)
 
-# 프로젝트 기본 경로
+# -----------------------------
+# 기본 설정
+# -----------------------------
 BASE_DIR = Path(__file__).resolve().parent
 DATA_PATH = BASE_DIR / "energydata_complete.csv"
 
-# 사용할 입력 변수
 FEATURES = [
     "T1", "RH_1",
     "T2", "RH_2",
@@ -27,6 +22,61 @@ FEATURES = [
 
 
 # -----------------------------
+# 선형회귀 모델 직접 구현
+# -----------------------------
+class LinearRegressionModel:
+
+    def __init__(self):
+        self.coefficients = None
+
+    def fit(self, X, y):
+        X = np.asarray(X, dtype=float)
+        y = np.asarray(y, dtype=float)
+
+        # 절편을 위한 열 추가
+        X_with_intercept = np.column_stack([
+            np.ones(len(X)),
+            X
+        ])
+
+        # 최소제곱법으로 계수 계산
+        self.coefficients = np.linalg.lstsq(
+            X_with_intercept,
+            y,
+            rcond=None
+        )[0]
+
+        return self
+
+    def predict(self, X):
+        X = np.asarray(X, dtype=float)
+
+        X_with_intercept = np.column_stack([
+            np.ones(len(X)),
+            X
+        ])
+
+        return X_with_intercept @ self.coefficients
+
+
+# -----------------------------
+# 기준 모델
+# -----------------------------
+class MeanBaselineModel:
+
+    def fit(self, X, y):
+        self.mean_value = float(np.mean(y))
+        return self
+
+    def predict(self, X):
+        return np.full(
+            len(X),
+            self.mean_value,
+            dtype=float
+        )
+
+
+# -----------------------------
 # 데이터 불러오기
 # -----------------------------
 @st.cache_data
@@ -34,7 +84,7 @@ def load_data():
 
     if not DATA_PATH.exists():
         raise FileNotFoundError(
-            "energydata_complete.csv 파일이 없습니다."
+            "energydata_complete.csv 파일이 최상위 폴더에 없습니다."
         )
 
     df = pd.read_csv(DATA_PATH)
@@ -47,20 +97,50 @@ def load_data():
         "Windspeed", "lights"
     ]
 
-    missing = [col for col in required if col not in df.columns]
+    missing = [
+        col for col in required
+        if col not in df.columns
+    ]
 
     if missing:
         raise ValueError(
-            f"필수 데이터 열이 없습니다: {missing}"
+            f"CSV에 필요한 열이 없습니다: {missing}"
         )
 
     df["date"] = pd.to_datetime(
-        df["date"], errors="coerce"
+        df["date"],
+        errors="coerce"
     )
 
-    df = df.dropna(subset=required).copy()
+    # 숫자형 데이터 변환
+    numeric_columns = [
+        col for col in required
+        if col != "date"
+    ]
 
-    df = df.sort_values("date").reset_index(drop=True)
+    for col in numeric_columns:
+        df[col] = pd.to_numeric(
+            df[col],
+            errors="coerce"
+        )
+
+    df = df.replace(
+        [np.inf, -np.inf],
+        np.nan
+    )
+
+    df = df.dropna(
+        subset=required
+    )
+
+    df = df.sort_values(
+        "date"
+    ).reset_index(drop=True)
+
+    if len(df) < 100:
+        raise ValueError(
+            "학습에 사용할 수 있는 데이터가 부족합니다."
+        )
 
     return df
 
@@ -71,9 +151,9 @@ def load_data():
 @st.cache_data
 def preprocess_data():
 
-    df = load_data()
+    df = load_data().copy()
 
-    # 시간 및 요일 추출
+    # 시간과 요일 추출
     df["hour"] = df["date"].dt.hour
     df["dayofweek"] = df["date"].dt.dayofweek
 
@@ -95,14 +175,16 @@ def preprocess_data():
     )
 
     # 다음 측정 시점의 에너지 소비량
-    df["target_next"] = df["Appliances"].shift(-1)
+    df["target_next"] = (
+        df["Appliances"].shift(-1)
+    )
 
     df = df.dropna(
-        subset=["target_next"]
+        subset=FEATURES + ["target_next"]
     ).reset_index(drop=True)
 
-    X = df[FEATURES]
-    y = df["target_next"]
+    X = df[FEATURES].astype(float)
+    y = df["target_next"].astype(float)
 
     return df, X, y
 
@@ -150,15 +232,10 @@ def train_models():
         X_test, y_test
     ) = split_data()
 
-    # 선형회귀
-    model = LinearRegression()
+    model = LinearRegressionModel()
     model.fit(X_train, y_train)
 
-    # 기준 모델
-    baseline = DummyRegressor(
-        strategy="mean"
-    )
-
+    baseline = MeanBaselineModel()
     baseline.fit(X_train, y_train)
 
     return model, baseline
@@ -169,22 +246,43 @@ def train_models():
 # -----------------------------
 def evaluate_model(y_true, predictions):
 
-    mae = mean_absolute_error(
-        y_true, predictions
+    actual = np.asarray(
+        y_true,
+        dtype=float
+    )
+
+    predicted = np.asarray(
+        predictions,
+        dtype=float
+    )
+
+    errors = actual - predicted
+
+    mae = np.mean(
+        np.abs(errors)
     )
 
     rmse = np.sqrt(
-        mean_squared_error(y_true, predictions)
+        np.mean(errors ** 2)
     )
 
-    r2 = r2_score(
-        y_true, predictions
+    ss_res = np.sum(
+        errors ** 2
     )
+
+    ss_tot = np.sum(
+        (actual - np.mean(actual)) ** 2
+    )
+
+    if ss_tot == 0:
+        r2 = 0.0
+    else:
+        r2 = 1 - (ss_res / ss_tot)
 
     return {
-        "MAE": mae,
-        "RMSE": rmse,
-        "R2": r2
+        "MAE": float(mae),
+        "RMSE": float(rmse),
+        "R2": float(r2)
     }
 
 
