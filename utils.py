@@ -5,6 +5,7 @@ import numpy as np
 
 from pathlib import Path
 
+
 # -----------------------------
 # 기본 설정
 # -----------------------------
@@ -33,6 +34,15 @@ class LinearRegressionModel:
         X = np.asarray(X, dtype=float)
         y = np.asarray(y, dtype=float)
 
+        if X.ndim != 2 or y.ndim != 1:
+            raise ValueError("입력 데이터의 형태가 올바르지 않습니다.")
+
+        if len(X) != len(y) or len(X) == 0:
+            raise ValueError("학습 데이터의 개수가 올바르지 않습니다.")
+
+        if not np.isfinite(X).all() or not np.isfinite(y).all():
+            raise ValueError("학습 데이터에 유효하지 않은 값이 있습니다.")
+
         # 절편을 위한 열 추가
         X_with_intercept = np.column_stack([
             np.ones(len(X)),
@@ -49,7 +59,19 @@ class LinearRegressionModel:
         return self
 
     def predict(self, X):
+        if self.coefficients is None:
+            raise ValueError("모델이 아직 학습되지 않았습니다.")
+
         X = np.asarray(X, dtype=float)
+
+        if X.ndim != 2:
+            raise ValueError("예측 입력 데이터는 2차원이어야 합니다.")
+
+        if X.shape[1] != len(self.coefficients) - 1:
+            raise ValueError("학습 데이터와 예측 데이터의 변수 개수가 다릅니다.")
+
+        if not np.isfinite(X).all():
+            raise ValueError("예측 데이터에 유효하지 않은 값이 있습니다.")
 
         X_with_intercept = np.column_stack([
             np.ones(len(X)),
@@ -64,11 +86,26 @@ class LinearRegressionModel:
 # -----------------------------
 class MeanBaselineModel:
 
+    def __init__(self):
+        self.mean_value = None
+
     def fit(self, X, y):
+        y = np.asarray(y, dtype=float)
+
+        if y.ndim != 1 or len(y) == 0:
+            raise ValueError("기준 모델의 학습 데이터가 올바르지 않습니다.")
+
+        if not np.isfinite(y).all():
+            raise ValueError("기준 모델의 학습 데이터에 유효하지 않은 값이 있습니다.")
+
         self.mean_value = float(np.mean(y))
+
         return self
 
     def predict(self, X):
+        if self.mean_value is None:
+            raise ValueError("기준 모델이 아직 학습되지 않았습니다.")
+
         return np.full(
             len(X),
             self.mean_value,
@@ -107,6 +144,7 @@ def load_data():
             f"CSV에 필요한 열이 없습니다: {missing}"
         )
 
+    # 날짜 데이터 변환
     df["date"] = pd.to_datetime(
         df["date"],
         errors="coerce"
@@ -124,6 +162,7 @@ def load_data():
             errors="coerce"
         )
 
+    # 무한대 및 결측치 처리
     df = df.replace(
         [np.inf, -np.inf],
         np.nan
@@ -133,9 +172,17 @@ def load_data():
         subset=required
     )
 
+    # 시간 순서 정렬
     df = df.sort_values(
         "date"
     ).reset_index(drop=True)
+
+    # 중복된 측정 시각 확인
+    if df["date"].duplicated().any():
+        raise ValueError(
+            "CSV에 중복된 측정 시각이 있습니다. "
+            "데이터를 확인해야 합니다."
+        )
 
     if len(df) < 100:
         raise ValueError(
@@ -174,14 +221,44 @@ def preprocess_data():
         2 * np.pi * df["dayofweek"] / 7
     )
 
-    # 다음 측정 시점의 에너지 소비량
-    df["target_next"] = (
-        df["Appliances"].shift(-1)
+    # 정확히 10분 뒤의 에너지 소비량을 정답으로 설정
+    target_df = df[
+        ["date", "Appliances"]
+    ].copy()
+
+    target_df = target_df.rename(
+        columns={
+            "date": "target_time",
+            "Appliances": "target_next"
+        }
     )
 
+    # 현재 시각에서 10분 뒤의 데이터와 연결
+    df["target_time"] = (
+        df["date"] + pd.Timedelta(minutes=10)
+    )
+
+    df = df.merge(
+        target_df,
+        on="target_time",
+        how="inner",
+        validate="one_to_one"
+    )
+
+    # 불필요한 시간 열 제거
+    df = df.drop(
+        columns=["target_time"]
+    )
+
+    # 유효한 데이터만 사용
     df = df.dropna(
         subset=FEATURES + ["target_next"]
     ).reset_index(drop=True)
+
+    if len(df) < 100:
+        raise ValueError(
+            "10분 간격으로 연결할 수 있는 데이터가 부족합니다."
+        )
 
     X = df[FEATURES].astype(float)
     y = df["target_next"].astype(float)
@@ -211,6 +288,15 @@ def split_data():
     X_test = X.iloc[valid_end:]
     y_test = y.iloc[valid_end:]
 
+    if min(
+        len(X_train),
+        len(X_valid),
+        len(X_test)
+    ) == 0:
+        raise ValueError(
+            "학습, 검증, 평가 데이터 분리에 실패했습니다."
+        )
+
     return (
         df,
         X_train, y_train,
@@ -232,9 +318,11 @@ def train_models():
         X_test, y_test
     ) = split_data()
 
+    # 선형회귀 모델
     model = LinearRegressionModel()
     model.fit(X_train, y_train)
 
+    # 기준 모델
     baseline = MeanBaselineModel()
     baseline.fit(X_train, y_train)
 
@@ -256,16 +344,28 @@ def evaluate_model(y_true, predictions):
         dtype=float
     )
 
+    if actual.ndim != 1 or predicted.ndim != 1:
+        raise ValueError("평가 데이터는 1차원이어야 합니다.")
+
+    if len(actual) != len(predicted) or len(actual) == 0:
+        raise ValueError("실제값과 예측값의 개수가 일치하지 않습니다.")
+
+    if not np.isfinite(actual).all() or not np.isfinite(predicted).all():
+        raise ValueError("평가 데이터에 유효하지 않은 값이 있습니다.")
+
     errors = actual - predicted
 
+    # 평균 절대 오차
     mae = np.mean(
         np.abs(errors)
     )
 
+    # 평균 제곱근 오차
     rmse = np.sqrt(
         np.mean(errors ** 2)
     )
 
+    # 결정계수
     ss_res = np.sum(
         errors ** 2
     )
@@ -296,6 +396,22 @@ def make_input(
     windspeed, lights,
     hour, dayofweek
 ):
+
+    values = [
+        t1, rh1,
+        t2, rh2,
+        tout, rhout,
+        windspeed, lights
+    ]
+
+    if not np.isfinite(values).all():
+        raise ValueError("입력값에 유효하지 않은 값이 있습니다.")
+
+    if not 0 <= hour <= 23:
+        raise ValueError("시간은 0~23 사이여야 합니다.")
+
+    if not 0 <= dayofweek <= 6:
+        raise ValueError("요일은 0~6 사이여야 합니다.")
 
     return pd.DataFrame([{
         "T1": t1,
