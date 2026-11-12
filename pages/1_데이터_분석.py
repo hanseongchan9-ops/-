@@ -1,5 +1,5 @@
-
 import streamlit as st
+import pandas as pd
 import matplotlib.pyplot as plt
 
 from utils import load_data, preprocess_data
@@ -14,6 +14,7 @@ st.write("가정용 전자기기 에너지 소비 데이터의 구조와 특징�
 
 try:
     raw_df = load_data()
+    raw_df["date"] = pd.to_datetime(raw_df["date"])
     df, X, y = preprocess_data()
 
 except Exception as e:
@@ -44,7 +45,7 @@ st.header("데이터 미리보기")
 
 st.dataframe(
     raw_df.head(10),
-    width="stretch"
+    use_container_width=True
 )
 
 # -----------------------------
@@ -73,7 +74,7 @@ info_df["설명"] = info_df.index.map(variable_info)
 
 st.dataframe(
     info_df,
-    width="stretch"
+    use_container_width=True
 )
 
 # -----------------------------
@@ -86,7 +87,7 @@ missing = raw_df.isnull().sum()
 
 st.dataframe(
     missing.rename("결측치 개수"),
-    width="stretch"
+    use_container_width=True
 )
 
 # -----------------------------
