@@ -1,4 +1,3 @@
-
 import streamlit as st
 
 from utils import train_models, make_input
@@ -121,7 +120,7 @@ st.divider()
 if st.button(
     "10분 후 에너지 소비량 예측",
     type="primary",
-    width="stretch"
+    use_container_width=True
 ):
 
     input_data = make_input(
