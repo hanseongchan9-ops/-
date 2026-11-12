@@ -1,5 +1,5 @@
-
 import streamlit as st
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
@@ -39,16 +39,17 @@ except Exception as e:
 # -----------------------------
 # 테스트 데이터 예측
 # -----------------------------
-test_pred = model.predict(X_test)
-baseline_pred = baseline.predict(X_test)
+test_pred = np.ravel(model.predict(X_test))
+baseline_pred = np.ravel(baseline.predict(X_test))
+y_test_arr = np.ravel(y_test)
 
 model_result = evaluate_model(
-    y_test,
+    y_test_arr,
     test_pred
 )
 
 baseline_result = evaluate_model(
-    y_test,
+    y_test_arr,
     baseline_pred
 )
 
@@ -113,7 +114,7 @@ comparison = pd.DataFrame({
 
 st.dataframe(
     comparison,
-    width="stretch"
+    use_container_width=True
 )
 
 st.caption(
@@ -128,7 +129,7 @@ st.divider()
 st.header("실제값과 예측값 비교")
 
 result_df = pd.DataFrame({
-    "실제 에너지 소비량": y_test.values[:200],
+    "실제 에너지 소비량": y_test_arr[:200],
     "예측 에너지 소비량": test_pred[:200]
 })
 
@@ -140,7 +141,7 @@ st.line_chart(result_df)
 st.divider()
 st.header("예측 오차 분석")
 
-errors = y_test.values - test_pred
+errors = y_test_arr - test_pred
 
 fig, ax = plt.subplots(figsize=(9, 4))
 
